@@ -1,117 +1,141 @@
 import pandas as pd
 import numpy as np
 import joblib
-import statsmodels.api as sm
 import os
+import sys
+import warnings
+import json # Import the json module
+from economic_formulas import *
+
+# Ignorar advertencias
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
 # --- 1. Carga del Modelo y Datos de Entrada ---
-
 MODEL_FILE = 'bankruptcy_model.joblib'
-INPUT_CSV = 'datos_para_predecir.csv'
 
-# Verificar que los archivos necesarios existan
+# Aceptar un nombre de archivo desde la línea de comandos, con un valor por defecto
+if len(sys.argv) > 1:
+    INPUT_CSV = sys.argv[1]
+else:
+    INPUT_CSV = 'datos_para_predecir.csv'
+
 if not os.path.exists(MODEL_FILE):
-    print(f"Error: Archivo del modelo no encontrado: '{MODEL_FILE}'")
-    print("Por favor, ejecuta primero 'logistic_regression_pd_model.py' para entrenar y guardar el modelo.")
+    print(json.dumps({"error": f"Archivo del modelo no encontrado: '{MODEL_FILE}'"}))
     exit()
-
 if not os.path.exists(INPUT_CSV):
-    print(f"Error: Archivo de datos de entrada no encontrado: '{INPUT_CSV}'")
+    print(json.dumps({"error": f"Archivo de datos de entrada no encontrado: '{INPUT_CSV}'"}))
     exit()
 
-# Cargar el modelo y las columnas de características
 try:
     model_payload = joblib.load(MODEL_FILE)
-    logit_model = model_payload['model']
+    model = model_payload['model']
     feature_columns = model_payload['feature_columns']
 except Exception as e:
-    print(f"Error al cargar el archivo del modelo: {e}")
+    print(json.dumps({"error": f"Error al cargar el modelo: {e}"}))
     exit()
 
-# Cargar el dataset de entrada que el usuario proporcionaría
 try:
     df = pd.read_csv(INPUT_CSV)
 except Exception as e:
-    print(f"Error al leer el archivo CSV de entrada: {e}")
+    print(json.dumps({"error": f"Error al leer el CSV de entrada: {e}"}))
     exit()
 
-print(f"Modelo '{MODEL_FILE}' y datos de '{INPUT_CSV}' cargados exitosamente.")
-print("Iniciando predicción...")
+# print(f"Modelo y datos de entrada ('{INPUT_CSV}') cargados. Iniciando predicción con Scikit-learn.")
 
 # --- 2. Ingeniería de Características (Idéntica al entrenamiento) ---
-
-# Asegurar que las columnas necesarias sean numéricas
-# Usamos las columnas originales que dan lugar a las características del modelo
-original_cols = ['X1', 'X6', 'X10', 'X14', 'X17', 'fyear']
-for col in original_cols:
+cols_to_process = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X8', 'X9', 'X10', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17', 'X18', 'fyear']
+for col in cols_to_process:
     df[col] = pd.to_numeric(df[col], errors='coerce')
 
-# Ordenar los datos por empresa y año
+df.dropna(subset=cols_to_process, inplace=True)
 df.sort_values(['company_name', 'fyear'], inplace=True)
 
-# Agrupar por empresa para calcular métricas de series de tiempo
+WINDOW_SIZE = 3
+FALLBACK_INTEREST_RATE = 0.05
+
+results_features = [] # To store features for prediction
 grouped = df.groupby('company_name')
-feature_df = pd.DataFrame()
 
 for name, group in grouped:
-    temp_group = group.copy()
-    
-    # Recrear las mismas características que en el entrenamiento
-    temp_group['ROA'] = temp_group['X6'] / temp_group['X10']
-    temp_group['Debt_Ratio'] = temp_group['X17'] / temp_group['X10']
-    temp_group['X6_growth'] = temp_group['X6'].pct_change()
-    temp_group['X1_growth'] = temp_group['X1'].pct_change()
-    temp_group['debt_ratio_change'] = temp_group['Debt_Ratio'].diff()
-    temp_group['X6_volatility_3y'] = temp_group['X6'].rolling(window=3).std()
-    
-    feature_df = pd.concat([feature_df, temp_group])
+    if len(group) < WINDOW_SIZE:
+        continue
+
+    for window in group.rolling(window=WINDOW_SIZE):
+        if len(window) < WINDOW_SIZE:
+            continue
+
+        flujo_neto_operativo = (window['X16'] - window['X18']).tolist()
+        i_deduced = calculate_irr_from_series(flujo_neto_operativo)
+        if i_deduced is None:
+            i_deduced = FALLBACK_INTEREST_RATE
+
+        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
+        roa = window['X6'].iloc[-1] / window['X10'].iloc[-1]
+        debt_ratio = window['X17'].iloc[-1] / window['X10'].iloc[-1]
+
+        results_features.append({
+            'company_name': name,
+            'fyear': window['fyear'].iloc[-1],
+            'ROA': roa,
+            'Debt_Ratio': debt_ratio,
+            'X2': window['X2'].iloc[-1],
+            'X3': window['X3'].iloc[-1],
+            'X4': window['X4'].iloc[-1],
+            'X5': window['X5'].iloc[-1],
+            'X7': window['X7'].iloc[-1],
+            'X8': window['X8'].iloc[-1],
+            'X9': window['X9'].iloc[-1],
+            'X11': window['X11'].iloc[-1],
+            'X12': window['X12'].iloc[-1],
+            'X13': window['X13'].iloc[-1],
+            'X14': window['X14'].iloc[-1],
+            'X15': window['X15'].iloc[-1],
+            'X16': window['X16'].iloc[-1],
+            'X18': window['X18'].iloc[-1]
+        })
+
+predict_df = pd.DataFrame(results_features)
+# print("Ingeniería de características para predicción completada.")
 
 # --- 3. Preparación de Datos para Predicción ---
-
-# Reemplazar infinitos y eliminar NaNs, igual que en el entrenamiento
-feature_df.replace([np.inf, -np.inf], np.nan, inplace=True)
-predict_df = feature_df.dropna(subset=feature_columns)
+predict_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+predict_df.dropna(inplace=True)
 
 if predict_df.empty:
-    print("\nError: No se pudieron calcular las características para la predicción.")
-    print("Asegúrate de que el archivo CSV de entrada contenga suficientes datos históricos (al menos 3 años consecutivos por empresa).")
+    print(json.dumps({"error": "No se pudieron calcular las características para la predicción."}))
     exit()
 
-# Seleccionar las columnas de características y añadir la constante
 X_pred = predict_df[feature_columns]
-X_pred_const = sm.add_constant(X_pred, has_constant='add')
 
 # --- 4. Realizar y Mostrar la Predicción ---
-
-# Usar el modelo cargado para predecir la probabilidad
-# El resultado es la probabilidad de que la clase sea 1 (failed)
-probabilities = logit_model.predict(X_pred_const)
-
-# Añadir las probabilidades al DataFrame para una fácil interpretación
+probabilities = model.predict_proba(X_pred)[:, 1]
 predict_df['prediction_probability'] = probabilities
 
-print("\n" + "="*60)
-print("         Resultados de la Predicción de Quiebra")
-print("="*60)
-
-# Mostrar la predicción para el año más reciente de cada empresa
-# que tenga datos completos
-latest_predictions = predict_df.loc[predict_df.groupby('company_name')['fyear'].idxmax()]
-
-for index, row in latest_predictions.iterrows():
+final_predictions = []
+for index, row in predict_df.iterrows():
     company = row['company_name']
     year = int(row['fyear'])
     prob = row['prediction_probability']
-    
-    print(f"\nEmpresa: '{company}' (basado en datos hasta el año {year})")
-    print(f"  -> Probabilidad de Quiebra (PD): {prob:.4f} ({prob*100:.2f}%)")
-    
-    if prob > 0.5:
-        print("  -> Diagnóstico: ALTO RIESGO")
-    elif prob > 0.2:
-        print("  -> Diagnóstico: RIESGO MODERADO")
-    else:
-        print("  -> Diagnóstico: BAJO RIESGO")
 
-print("\n" + "="*60)
-print("Nota: La predicción se basa en el último año para el cual se pudieron calcular todas las métricas.")
+    diagnosis = ""
+    if prob > 0.5:
+        diagnosis = "ALTO RIESGO"
+    elif prob > 0.2:
+        diagnosis = "RIESGO MODERADO"
+    else:
+        diagnosis = "BAJO RIESGO"
+    
+    # Prepare feature values for output
+    feature_values = {col: row[col] for col in feature_columns}
+
+    final_predictions.append({
+        "company_name": company,
+        "fyear": year,
+        "probability": round(prob, 4),
+        "probability_percent": round(prob * 100, 2),
+        "diagnosis": diagnosis,
+        "features": feature_values
+    })
+
+print(json.dumps(final_predictions))

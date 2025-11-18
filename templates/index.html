@@ -78,7 +78,7 @@
               {% endif %}
             {% endwith %}
 
-            <form method="post" enctype="multipart/form-data">
+            <form method="post" enctype="multipart/form-data" action="/predict">
                 <div class="mb-4">
                     <label for="file" class="form-label">Archivo de Datos Financieros</label>
                     <input class="form-control" type="file" id="file" name="file" accept=".csv" required>
@@ -87,6 +87,11 @@
                     <i class="bi bi-graph-up-arrow me-2"></i>Analizar y Predecir
                 </button>
             </form>
+            <div class="text-center mt-3">
+                <a href="{{ github_repo_url }}" target="_blank" class="btn btn-info">
+                    <i class="bi bi-info-circle me-2"></i>Instrucciones
+                </a>
+            </div>
         </div>
 
         <footer class="text-center text-secondary mt-5">

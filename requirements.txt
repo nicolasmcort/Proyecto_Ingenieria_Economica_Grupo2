@@ -1,5 +1,6 @@
-Flask
 pandas
 numpy
 joblib
 statsmodels
+scikit-learn
+Flask

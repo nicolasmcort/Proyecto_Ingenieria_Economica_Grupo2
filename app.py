@@ -5,6 +5,7 @@ import joblib
 import statsmodels.api as sm
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
+from economic_formulas import calculate_irr_from_series, calculate_npv_from_series
 
 # --- Configuración de la Aplicación Flask ---
 UPLOAD_FOLDER = 'uploads'
@@ -14,7 +15,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = 'supersecretkey' # Necesario para los mensajes flash
 
-# --- Lógica de Predicción (Adaptada de predict_pd.py) ---
+# --- Lógica de Predicción (Corregida para coincidir con el entrenamiento) ---
 
 def allowed_file(filename):
     """Verifica si la extensión del archivo es válida."""
@@ -25,109 +26,287 @@ def get_prediction(file_path):
     Procesa un archivo CSV y devuelve las predicciones de quiebra.
     """
     MODEL_FILE = 'bankruptcy_model.joblib'
+    WINDOW_SIZE = 3
+    FALLBACK_INTEREST_RATE = 0.05
 
     if not os.path.exists(MODEL_FILE):
         raise FileNotFoundError(f"Archivo del modelo no encontrado: '{MODEL_FILE}'")
 
     model_payload = joblib.load(MODEL_FILE)
-    logit_model = model_payload['model']
+    model = model_payload['model']
     feature_columns = model_payload['feature_columns']
 
-    df = pd.read_csv(file_path)
+    try:
+        df = pd.read_csv(file_path, encoding='utf-8')
+    except UnicodeDecodeError:
+        try:
+            df = pd.read_csv(file_path, encoding='latin1')
+        except Exception:
+            raise ValueError("Error de codificación: El archivo CSV no está en formato UTF-8 ni Latin-1.")
+    except pd.errors.ParserError:
+        try:
+            df = pd.read_csv(file_path, delimiter=';', encoding='utf-8')
+        except UnicodeDecodeError:
+            try:
+                df = pd.read_csv(file_path, delimiter=';', encoding='latin1')
+            except Exception:
+                raise ValueError("Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto.")
+        except Exception:
+            raise ValueError("Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto.")
+    except Exception as e:
+        raise ValueError(f"Error al leer el archivo CSV: {e}")
 
     # --- Ingeniería de Características (Idéntica al entrenamiento) ---
-    original_cols = ['X1', 'X6', 'X10', 'X14', 'X17', 'fyear']
-    for col in original_cols:
+    cols_to_process = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X8', 'X9', 'X10', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17', 'X18', 'fyear']
+    for col in cols_to_process:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     df.sort_values(['company_name', 'fyear'], inplace=True)
+    
+    prediction_features = []
     grouped = df.groupby('company_name')
-    feature_df = pd.DataFrame()
 
     for name, group in grouped:
-        temp_group = group.copy()
-        temp_group['ROA'] = temp_group['X6'] / temp_group['X10']
-        temp_group['Debt_Ratio'] = temp_group['X17'] / temp_group['X10']
-        temp_group['X6_growth'] = temp_group['X6'].pct_change()
-        temp_group['X1_growth'] = temp_group['X1'].pct_change()
-        temp_group['debt_ratio_change'] = temp_group['Debt_Ratio'].diff()
-        temp_group['X6_volatility_3y'] = temp_group['X6'].rolling(window=3).std()
-        feature_df = pd.concat([feature_df, temp_group])
+        if len(group) < WINDOW_SIZE:
+            continue
 
-    feature_df.replace([np.inf, -np.inf], np.nan, inplace=True)
-    predict_df = feature_df.dropna(subset=feature_columns)
+        # Usar rolling para crear las características para la última fila disponible
+        window = group.rolling(window=WINDOW_SIZE)
+        
+        if len(group) >= WINDOW_SIZE:
+            last_window = group.iloc[-WINDOW_SIZE:]
+            
+            flujo_neto_operativo = (last_window['X16'] - last_window['X18']).tolist()
+            
+            i_deduced = calculate_irr_from_series(flujo_neto_operativo)
+            if i_deduced is None:
+                i_deduced = FALLBACK_INTEREST_RATE
+
+            vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
+            
+            # Asegurarse de que los denominadores no sean cero
+            last_X10 = last_window['X10'].iloc[-1]
+            if last_X10 == 0:
+                continue # O manejar de otra forma
+
+            roa = last_window['X6'].iloc[-1] / last_X10
+            debt_ratio = last_window['X17'].iloc[-1] / last_X10
+
+            prediction_features.append({
+                'company_name': name,
+                'fyear': last_window['fyear'].iloc[-1],
+                'ROA': roa,
+                'Debt_Ratio': debt_ratio,
+                'X2': last_window['X2'].iloc[-1],
+                'X3': last_window['X3'].iloc[-1],
+                'X4': last_window['X4'].iloc[-1],
+                'X5': last_window['X5'].iloc[-1],
+                'X7': last_window['X7'].iloc[-1],
+                'X8': last_window['X8'].iloc[-1],
+                'X9': last_window['X9'].iloc[-1],
+                'X11': last_window['X11'].iloc[-1],
+                'X12': last_window['X12'].iloc[-1],
+                'X13': last_window['X13'].iloc[-1],
+                'X14': last_window['X14'].iloc[-1],
+                'X15': last_window['X15'].iloc[-1],
+                'X16': last_window['X16'].iloc[-1],
+                'X18': last_window['X18'].iloc[-1]
+            })
+
+    if not prediction_features:
+        return None
+
+    predict_df = pd.DataFrame(prediction_features)
+    predict_df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    predict_df.dropna(inplace=True)
 
     if predict_df.empty:
         return None
 
     X_pred = predict_df[feature_columns]
-    X_pred_const = sm.add_constant(X_pred, has_constant='add')
     
-    probabilities = logit_model.predict(X_pred_const)
+    # El modelo de scikit-learn predice la probabilidad con predict_proba
+    probabilities = model.predict_proba(X_pred)[:, 1] # Probabilidad de la clase '1' (failed)
     predict_df['prediction_probability'] = probabilities
-
-    latest_predictions = predict_df.loc[predict_df.groupby('company_name')['fyear'].idxmax()].copy()
     
     # --- Asignar Diagnóstico y Color ---
     results = []
-    for index, row in latest_predictions.iterrows():
+    for index, row in predict_df.iterrows():
         prob = row['prediction_probability']
         diagnosis = ''
         color_class = ''
         if prob > 0.5:
             diagnosis = 'ALTO RIESGO'
-            color_class = 'danger' # Rojo de Bootstrap
+            color_class = 'danger'
         elif prob > 0.2:
             diagnosis = 'RIESGO MODERADO'
-            color_class = 'warning' # Amarillo de Bootstrap
+            color_class = 'warning'
         else:
             diagnosis = 'BAJO RIESGO'
-            color_class = 'success' # Verde de Bootstrap
+            color_class = 'success'
+
+        warnings = []
+        # Sanity check de los ratios calculados
+        if not (-10 < row['ROA'] < 10):
+            warnings.append("Advertencia: El ratio ROA (Rentabilidad sobre Activos) tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable.")
+        if not (0 <= row['Debt_Ratio'] < 10):
+            warnings.append("Advertencia: El ratio de Endeudamiento tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable.")
+
+        # Pre-procesar las características para la plantilla
+        processed_features = {}
+        for col in feature_columns:
+            value = row[col]
+            description_info = feature_descriptions.get(col, {})
+            color = description_info.get('impact_color', lambda v: 'text-muted')(value)
+            unit = description_info.get('unit', '')
+
+            if unit == 'ratio':
+                formatted_value = f"{value:.4f}" # Formato de ratio como número decimal
+            elif unit == 'currency':
+                formatted_value = f"{value:,.2f}" # Formato de moneda con comas
+            else:
+                formatted_value = f"{value:.4f}"
+
+            processed_features[col] = {
+                'value': formatted_value,
+                'desc': description_info.get('desc', 'Descripción no disponible.'),
+                'impact_color': color
+            }
 
         results.append({
             'company': row['company_name'],
             'year': int(row['fyear']),
             'probability': f"{prob*100:.2f}%",
             'diagnosis': diagnosis,
-            'color_class': color_class
+            'color_class': color_class,
+            'features': processed_features,
+            'warnings': warnings
         })
     return results
 
+feature_descriptions = {
+    'ROA': {
+        'desc': 'Return on Assets (ROA). Mide la eficiencia para generar ganancias con los activos. Se expresa como un ratio, donde un valor de 0.05 equivale a un 5%. Un ROA superior a 0.05 (5%) generalmente se considera bueno.',
+        'unit': 'ratio',
+        'impact_color': lambda val: 'text-success' if val > 0.05 else ('text-warning' if val > 0 else 'text-danger')
+    },
+    'Debt_Ratio': {
+        'desc': 'Debt Ratio (Ratio de Endeudamiento). Proporción de activos financiados por deuda. Se expresa como un ratio, donde un valor de 0.6 equivale a un 60%. Un ratio inferior a 0.6 es saludable. Superior a 1.0 indica que la deuda supera los activos.',
+        'unit': 'ratio',
+        'impact_color': lambda val: 'text-success' if val < 0.4 else ('text-warning' if val < 0.6 else 'text-danger')
+    },
+    'X2': {
+        'desc': 'Costo de Bienes Vendidos. Costos directos de producción. Es una cifra monetaria. Su interpretación depende de la relación con los ingresos y la industria.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X3': {
+        'desc': 'Depreciación y Amortización. Gasto no monetario que reduce el valor de los activos. Es una cifra monetaria. No es directamente un indicador de riesgo.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X4': {
+        'desc': 'EBITDA. Ganancias antes de intereses, impuestos, etc. Es una cifra monetaria que mide la rentabilidad operativa. Un valor positivo y creciente es favorable.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X5': {
+        'desc': 'Inventario. Valor de los bienes para la venta. Es una cifra monetaria. Un nivel muy alto en comparación con las ventas puede indicar problemas.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X7': {
+        'desc': 'Cuentas por Cobrar Totales. Dinero que los clientes deben. Es una cifra monetaria. Un aumento drástico puede ser una señal de alerta.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X8': {
+        'desc': 'Valor de Mercado. Capitalización de mercado total. Es una cifra monetaria. Un valor alto y estable es una señal de confianza del mercado.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X9': {
+        'desc': 'Ventas Netas. Ingresos totales por ventas. Es una cifra monetaria. Un valor alto y creciente es favorable.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X11': {
+        'desc': 'Deuda Total a Largo Plazo. Deudas con vencimiento mayor a un año. Es una cifra monetaria. Debe evaluarse en relación con los activos y ganancias.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X12': {
+        'desc': 'EBIT. Ganancias Antes de Intereses e Impuestos. Es una cifra monetaria que mide la rentabilidad operativa. Un valor positivo es crucial.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X13': {
+        'desc': 'Ganancia Bruta. Ganancia tras deducir costos de producción. Es una cifra monetaria. Un margen bruto saludable depende de la industria.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X14': {
+        'desc': 'Pasivos Corrientes Totales. Deudas a pagar en menos de un año. Es una cifra monetaria. Un valor bajo en relación a los activos corrientes es favorable.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    },
+    'X15': {
+        'desc': 'Ganancias Retenidas. Ganancias reinvertidas en la empresa. Es una cifra monetaria. Un historial de crecimiento constante es muy favorable.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X16': {
+        'desc': 'Ingresos Totales. Dinero total generado por ventas. Es una cifra monetaria. El crecimiento constante es una señal de salud.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X18': {
+        'desc': 'Gastos Operativos Totales. Costos del funcionamiento del negocio. Es una cifra monetaria. Deben ser sostenibles en relación con los ingresos.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
+    }
+}
+
+GITHUB_REPO_URL = "https://github.com/nicolasmcort/Proyecto_Ingenieria_Economica_Grupo2.git" # Placeholder URL
+
 # --- Rutas de la Aplicación Web ---
 
-@app.route('/', methods=['GET', 'POST'])
-def upload_file():
-    if request.method == 'POST':
-        if 'file' not in request.files:
-            flash('No se encontró el campo del archivo.')
-            return redirect(request.url)
+@app.route('/')
+def index():
+    return render_template('index.html', github_repo_url=GITHUB_REPO_URL)
+
+@app.route('/predict', methods=['POST'])
+def predict():
+    if 'file' not in request.files:
+        flash('No se encontró el campo del archivo.')
+        return redirect(url_for('index')) # Redirect to index if no file
+    
+    file = request.files['file']
+
+    if file.filename == '':
+        flash('Ningún archivo seleccionado.')
+        return redirect(url_for('index')) # Redirect to index if no file selected
+
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+        file.save(filepath)
         
-        file = request.files['file']
-
-        if file.filename == '':
-            flash('Ningún archivo seleccionado.')
-            return redirect(request.url)
-
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-            file.save(filepath)
-            
-            try:
-                predictions = get_prediction(filepath)
-                if predictions is None:
-                    flash('No se pudieron generar predicciones. Asegúrate de que el CSV tenga suficientes datos (al menos 3 años por empresa).')
-                    return redirect(request.url)
-                # Pasa los resultados a la plantilla de resultados
-                return render_template('results.html', predictions=predictions)
-            except Exception as e:
-                flash(f'Ocurrió un error al procesar el archivo: {e}')
-                return redirect(request.url)
-        else:
-            flash('Formato de archivo no permitido. Por favor, sube un archivo .csv')
-            return redirect(request.url)
-
-    return render_template('index.html')
+        try:
+            predictions = get_prediction(filepath)
+            if predictions is None:
+                flash('No se pudieron generar predicciones. Asegúrate de que el CSV tenga suficientes datos (al menos 3 años por empresa).')
+                return redirect(url_for('index')) # Redirect to index if no predictions
+            # Pasa los resultados a la plantilla de resultados
+            return render_template('results.html', predictions=predictions, feature_descriptions=feature_descriptions)
+        except Exception as e:
+            import traceback
+            app.logger.error(f"Error al procesar el archivo: {e}\n{traceback.format_exc()}")
+            flash(f'Ocurrió un error al procesar el archivo: {e}. Por favor, revisa el formato de tu CSV.')
+            return redirect(url_for('index')) # Redirect to index on error
+    else:
+        flash('Formato de archivo no permitido. Por favor, sube un archivo .csv')
+        return redirect(url_for('index')) # Redirect to index on invalid file type
 
 if __name__ == '__main__':
     # Crear la carpeta de subidas si no existe

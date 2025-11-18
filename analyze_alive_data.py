@@ -1,21 +1,15 @@
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import Pipeline
 import numpy as np
-import joblib
 import warnings
-from economic_formulas import *
+from economic_formulas import calculate_irr_from_series, calculate_npv_from_series
 
-# Ignorar advertencias
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
-# --- 1. Carga y Preparación de Datos ---
 try:
     df = pd.read_csv('american_bankruptcy_dataset.csv')
 except FileNotFoundError:
-    print("Error: El archivo 'american_bankruptcy_dataset.csv' no se encontró.")
+    print('Error: El archivo american_bankruptcy_dataset.csv no se encontró.')
     exit()
 
 df['status_label'] = df['status_label'].map({'alive': 0, 'failed': 1})
@@ -25,9 +19,7 @@ for col in cols_to_process:
 
 df.dropna(subset=cols_to_process, inplace=True)
 df.sort_values(['company_name', 'fyear'], inplace=True)
-print("Datos cargados. Usando el motor de Scikit-learn.")
 
-# --- 2. Ingeniería de Características (Estable) ---
 WINDOW_SIZE = 3
 FALLBACK_INTEREST_RATE = 0.05
 
@@ -74,46 +66,14 @@ for name, group in grouped:
         })
 
 final_df = pd.DataFrame(results)
-print("Ingeniería de características completada.")
-
-# --- 3. Limpieza Final ---
 final_df.replace([np.inf, -np.inf], np.nan, inplace=True)
 final_df.dropna(inplace=True)
 
-if final_df.empty:
-    print("Error: No se pudieron generar características válidas.")
-    exit()
+# Filter for 'alive' companies
+alive_df = final_df[final_df['status_label'] == 0]
 
-# --- 4. Definición y Entrenamiento del Modelo con Scikit-learn ---
-y = final_df['status_label']
 feature_columns = ['ROA', 'Debt_Ratio', 'X2', 'X3', 'X4', 'X5', 'X7', 'X8', 'X9', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X18']
-X = final_df[feature_columns]
+X_alive = alive_df[feature_columns]
 
-# Crear un pipeline con LogisticRegression
-pipeline = Pipeline([
-    ('scaler', StandardScaler()),
-    ('lr', LogisticRegression(random_state=42, solver='liblinear', class_weight='balanced', C=0.1, max_iter=1000)) # Usar LogisticRegression
-])
-
-# Entrenar el pipeline
-pipeline.fit(X, y)
-
-print("\nEntrenamiento con Scikit-learn completado.")
-
-# --- 5. Inspección de Importancia de Características (Debug) ---
-print("\n" + "="*80)
-print("Inspección de Coeficientes del Modelo de Regresión Logística")
-print("="*80)
-# Los coeficientes están dentro del paso 'lr' del pipeline
-coeficientes = pd.DataFrame(pipeline.named_steps['lr'].coef_[0], index=feature_columns, columns=['Coeficiente'])
-print("Un coeficiente positivo indica que la característica aumenta la probabilidad de quiebra.")
-print(coeficientes.sort_values(by='Coeficiente', ascending=False))
-print("="*80)
-
-
-# --- 6. Guardar el Modelo ---
-model_payload = {'model': pipeline, 'feature_columns': feature_columns}
-joblib.dump(model_payload, 'bankruptcy_model.joblib')
-
-print("\nModelo entrenado y guardado exitosamente en 'bankruptcy_model.joblib'")
-print("Características finales en el modelo:", feature_columns)
+print('Descriptive statistics for "alive" companies in training features:')
+print(X_alive.describe().to_string())
