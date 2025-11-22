@@ -5,7 +5,8 @@ from sklearn.pipeline import Pipeline
 import numpy as np
 import joblib
 import warnings
-from economic_formulas import *
+# Asegúrate de que este módulo esté en el mismo directorio
+from economic_formulas import calculate_irr_from_series, calculate_npv_from_series 
 
 # Ignorar advertencias
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -18,6 +19,7 @@ except FileNotFoundError:
     print("Error: El archivo 'american_bankruptcy_dataset.csv' no se encontró.")
     exit()
 
+# Mapear la etiqueta binaria
 df['status_label'] = df['status_label'].map({'alive': 0, 'failed': 1})
 cols_to_process = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X8', 'X9', 'X10', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17', 'X18', 'fyear', 'status_label']
 for col in cols_to_process:
@@ -47,9 +49,17 @@ for name, group in grouped:
         if i_deduced is None:
             i_deduced = FALLBACK_INTEREST_RATE
 
-        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
-        roa = window['X6'].iloc[-1] / window['X10'].iloc[-1]
-        debt_ratio = window['X17'].iloc[-1] / window['X10'].iloc[-1]
+        # Nota: vp_neto se calcula pero no se usa como feature final (al igual que el script original)
+        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced) 
+        
+        # Validación para evitar división por cero en los ratios
+        if window['X10'].iloc[-1] == 0:
+            roa = np.nan
+            debt_ratio = np.nan
+        else:
+            roa = window['X6'].iloc[-1] / window['X10'].iloc[-1]
+            debt_ratio = window['X17'].iloc[-1] / window['X10'].iloc[-1]
+
 
         results.append({
             'company_name': name,
@@ -57,6 +67,7 @@ for name, group in grouped:
             'status_label': window['status_label'].iloc[-1],
             'ROA': roa,
             'Debt_Ratio': debt_ratio,
+            'X1': window['X1'].iloc[-1], # <<< AÑADIDA X1 EN EL RESULTADO
             'X2': window['X2'].iloc[-1],
             'X3': window['X3'].iloc[-1],
             'X4': window['X4'].iloc[-1],
@@ -86,19 +97,21 @@ if final_df.empty:
 
 # --- 4. Definición y Entrenamiento del Modelo con Scikit-learn ---
 y = final_df['status_label']
-feature_columns = ['ROA', 'Debt_Ratio', 'X2', 'X3', 'X4', 'X5', 'X7', 'X8', 'X9', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X18']
+
+# MODIFICACIÓN CLAVE: INCLUIR 'X1' EN LA LISTA DE FEATURES (17 VARIABLES AHORA)
+feature_columns = ['X1', 'ROA', 'Debt_Ratio', 'X2', 'X3', 'X4', 'X5', 'X7', 'X8', 'X9', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X18']
 X = final_df[feature_columns]
 
 # Crear un pipeline con LogisticRegression
 pipeline = Pipeline([
     ('scaler', StandardScaler()),
-    ('lr', LogisticRegression(random_state=42, solver='liblinear', class_weight='balanced', C=0.1, max_iter=1000)) # Usar LogisticRegression
+    ('lr', LogisticRegression(random_state=42, solver='liblinear', class_weight='balanced', C=0.1, max_iter=1000)) 
 ])
 
 # Entrenar el pipeline
 pipeline.fit(X, y)
 
-print("\nEntrenamiento con Scikit-learn completado.")
+print("\nEntrenamiento con Scikit-learn completado. El modelo ahora utiliza X1.")
 
 # --- 5. Inspección de Importancia de Características (Debug) ---
 print("\n" + "="*80)
@@ -113,7 +126,8 @@ print("="*80)
 
 # --- 6. Guardar el Modelo ---
 model_payload = {'model': pipeline, 'feature_columns': feature_columns}
-joblib.dump(model_payload, 'bankruptcy_model.joblib')
+# Se recomienda guardar con un nombre nuevo para no sobrescribir la versión anterior
+joblib.dump(model_payload, 'bankruptcy_model_v2.joblib')
 
-print("\nModelo entrenado y guardado exitosamente en 'bankruptcy_model.joblib'")
+print("\nModelo entrenado y guardado exitosamente en 'bankruptcy_model_v2.joblib'")
 print("Características finales en el modelo:", feature_columns)

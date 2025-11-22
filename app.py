@@ -2,7 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 import joblib
-import statsmodels.api as sm
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 from economic_formulas import calculate_irr_from_series, calculate_npv_from_series
@@ -15,7 +14,7 @@ app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.secret_key = 'supersecretkey' # Necesario para los mensajes flash
 
-# --- Lógica de Predicción (Corregida para coincidir con el entrenamiento) ---
+# --- Lógica de Predicción (Corregida para incluir X1) ---
 
 def allowed_file(filename):
     """Verifica si la extensión del archivo es válida."""
@@ -25,15 +24,18 @@ def get_prediction(file_path):
     """
     Procesa un archivo CSV y devuelve las predicciones de quiebra.
     """
-    MODEL_FILE = 'bankruptcy_model.joblib'
+    # 🚨 CAMBIO CLAVE: Usar el modelo que incluye X1
+    MODEL_FILE = 'bankruptcy_model_v2.joblib' 
     WINDOW_SIZE = 3
     FALLBACK_INTEREST_RATE = 0.05
 
     if not os.path.exists(MODEL_FILE):
-        raise FileNotFoundError(f"Archivo del modelo no encontrado: '{MODEL_FILE}'")
+        raise FileNotFoundError(f"Archivo del modelo no encontrado: '{MODEL_FILE}'. Asegúrate de haber entrenado y guardado 'bankruptcy_model_v2.joblib'.")
 
     model_payload = joblib.load(MODEL_FILE)
     model = model_payload['model']
+    
+    # 🚨 CAMBIO CLAVE: feature_columns ahora debe coincidir con las 17 del nuevo modelo
     feature_columns = model_payload['feature_columns']
 
     try:
@@ -70,9 +72,6 @@ def get_prediction(file_path):
         if len(group) < WINDOW_SIZE:
             continue
 
-        # Usar rolling para crear las características para la última fila disponible
-        window = group.rolling(window=WINDOW_SIZE)
-        
         if len(group) >= WINDOW_SIZE:
             last_window = group.iloc[-WINDOW_SIZE:]
             
@@ -97,6 +96,7 @@ def get_prediction(file_path):
                 'fyear': last_window['fyear'].iloc[-1],
                 'ROA': roa,
                 'Debt_Ratio': debt_ratio,
+                'X1': last_window['X1'].iloc[-1], # <<< AÑADIDA X1 A LAS CARACTERÍSTICAS
                 'X2': last_window['X2'].iloc[-1],
                 'X3': last_window['X3'].iloc[-1],
                 'X4': last_window['X4'].iloc[-1],
@@ -123,7 +123,8 @@ def get_prediction(file_path):
     if predict_df.empty:
         return None
 
-    X_pred = predict_df[feature_columns]
+    # El orden de las columnas DEBE coincidir con feature_columns del modelo cargado
+    X_pred = predict_df[feature_columns] 
     
     # El modelo de scikit-learn predice la probabilidad con predict_proba
     probabilities = model.predict_proba(X_pred)[:, 1] # Probabilidad de la clase '1' (failed)
@@ -184,7 +185,13 @@ def get_prediction(file_path):
         })
     return results
 
+# 🚨 CAMBIO CLAVE: AÑADIR DESCRIPCIÓN Y LÓGICA DE COLOR PARA X1
 feature_descriptions = {
+    'X1': {
+        'desc': 'Activos Corrientes Totales. Recursos que se espera convertir en efectivo o consumir en un año. Es una cifra monetaria. Un valor alto en relación con los Pasivos Corrientes (X14) es favorable.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
     'ROA': {
         'desc': 'Return on Assets (ROA). Mide la eficiencia para generar ganancias con los activos. Se expresa como un ratio, donde un valor de 0.05 equivale a un 5%. Un ROA superior a 0.05 (5%) generalmente se considera bueno.',
         'unit': 'ratio',
@@ -288,6 +295,10 @@ def predict():
         return redirect(url_for('index')) # Redirect to index if no file selected
 
     if file and allowed_file(file.filename):
+        # Crear el directorio de subidas si no existe
+        if not os.path.exists(app.config['UPLOAD_FOLDER']):
+            os.makedirs(app.config['UPLOAD_FOLDER'])
+            
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
@@ -295,7 +306,7 @@ def predict():
         try:
             predictions = get_prediction(filepath)
             if predictions is None:
-                flash('No se pudieron generar predicciones. Asegúrate de que el CSV tenga suficientes datos (al menos 3 años por empresa).')
+                flash('No se pudieron generar predicciones. Asegúrate de que el CSV tenga suficientes datos (al menos 3 años por empresa) y que los datos sean válidos.')
                 return redirect(url_for('index')) # Redirect to index if no predictions
             # Pasa los resultados a la plantilla de resultados
             return render_template('results.html', predictions=predictions, feature_descriptions=feature_descriptions)
