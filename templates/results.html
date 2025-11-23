@@ -105,6 +105,10 @@
                                 </li>
                             </ul>
                             
+                            <a href="/visualize/{{ uploaded_filename }}/{{ p.company }}" class="btn btn-outline-primary mt-3">
+                                <i class="bi bi-bar-chart-line-fill me-1"></i>Ver Diagrama de Flujo de Caja
+                            </a>
+                            
                             <!-- Accordion para detalles -->
                             <div class="accordion mt-3" id="accordion-{{ loop.index }}">
                                 <div class="accordion-item">
@@ -112,8 +116,7 @@
                                         <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-{{ loop.index }}" aria-expanded="false" aria-controls="collapse-{{ loop.index }}">
                                             Detalles del Análisis
                                         </button>
-                                    </h2>
-                                    <div id="collapse-{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="heading-{{ loop.index }}" data-bs-parent="#accordion-{{ loop.index }}">
+                                    </h2>                                    <div id="collapse-{{ loop.index }}" class="accordion-collapse collapse" aria-labelledby="heading-{{ loop.index }}" data-bs-parent="#accordion-{{ loop.index }}">
                                         <div class="accordion-body">
                                             <ul class="list-group list-group-flush">
                                                 {% for key, data in p.features.items() %}

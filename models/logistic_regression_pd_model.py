@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Add parent directory to path to import utils
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -5,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
 import joblib
 import warnings
-from economic_formulas import calculate_irr_from_series, calculate_npv_from_series, calculate_aw_from_pv
+from utils.economic_formulas import calculate_npv_from_series, calculate_aw_from_pv
 
 # Ignorar advertencias
 warnings.filterwarnings('ignore', category=FutureWarning)
@@ -14,10 +20,11 @@ warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 # ---------------------------------------------------------------------
 # 1. Carga y preparación de datos
 # ---------------------------------------------------------------------
+DATA_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'american_bankruptcy_dataset.csv')
 try:
-    df = pd.read_csv('american_bankruptcy_dataset.csv')
+    df = pd.read_csv(DATA_FILE)
 except FileNotFoundError:
-    print("Error: El archivo 'american_bankruptcy_dataset.csv' no se encontró.")
+    print(f"Error: El archivo '{DATA_FILE}' no se encontró.")
     exit()
 
 # Convertir etiqueta binaria
@@ -53,13 +60,13 @@ for name, group in df.groupby('company_name'):
         window = group.iloc[i - WINDOW_SIZE:i]
         # Flujo neto operativo
         flujo_neto_operativo = (window['X16'] - window['X18']).tolist()
-        # TIR (Tasa Interna de Retorno)
-        i_deduced = calculate_irr_from_series(flujo_neto_operativo)
-        if i_deduced is None:
-            i_deduced = FALLBACK_INTEREST_RATE
+        # Tasa de Interés de Oportunidad (TIO) estándar
+        i_estandar = 0.12
+        
         # VPN y VA
-        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
-        va = calculate_aw_from_pv(vp_neto, i_deduced, WINDOW_SIZE)
+        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_estandar)
+        va = calculate_aw_from_pv(vp_neto, i_estandar, WINDOW_SIZE)
+        
         # Ratios (evitar división por cero)
         last_X10 = window['X10'].iloc[-1]
         if last_X10 == 0:
@@ -76,7 +83,7 @@ for name, group in df.groupby('company_name'):
             'ROA': roa,
             'Debt_Ratio': debt_ratio,
             'VA': va,
-            'TIR': i_deduced,
+            'i': i_estandar,
             'X1': window['X1'].iloc[-1],
             'X2': window['X2'].iloc[-1],
             'X3': window['X3'].iloc[-1],
@@ -110,7 +117,7 @@ if final_df.empty:
 Y = final_df['status_label']
 # Lista de columnas usadas por el modelo (incluye TIR)
 feature_columns = [
-    'X1', 'ROA', 'Debt_Ratio', 'VA', 'TIR',
+    'X1', 'ROA', 'Debt_Ratio', 'VA', 'i',
     'X2', 'X3', 'X4', 'X5', 'X7', 'X8', 'X9',
     'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X18'
 ]
@@ -138,6 +145,7 @@ print(coef_df.sort_values(by='Coeficiente', ascending=False))
 print("=" * 80)
 
 # Guardar modelo
+MODEL_SAVE_PATH = os.path.join(os.path.dirname(__file__), 'bankruptcy_model_v2.joblib')
 model_payload = {'model': pipeline, 'feature_columns': feature_columns}
-joblib.dump(model_payload, 'bankruptcy_model_v2.joblib')
-print("Modelo guardado en 'bankruptcy_model_v2.joblib'.")
+joblib.dump(model_payload, MODEL_SAVE_PATH)
+print(f"Modelo guardado en '{MODEL_SAVE_PATH}'.")
