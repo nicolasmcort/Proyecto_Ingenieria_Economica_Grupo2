@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
-from economic_formulas import calculate_irr_from_series, calculate_npv_from_series, calculate_aw_from_pv
+from utils.economic_formulas import calculate_npv_from_series, calculate_aw_from_pv, calculate_discounted_payback_period
 
 # --- Configuración de la Aplicación Flask ---
 UPLOAD_FOLDER = 'uploads'
@@ -23,7 +23,7 @@ def allowed_file(filename):
 
 def get_prediction(file_path):
     """Procesa un archivo CSV y devuelve las predicciones de quiebra."""
-    MODEL_FILE = 'bankruptcy_model_v2.joblib'
+    MODEL_FILE = os.path.join('models', 'bankruptcy_model_v2.joblib')
     WINDOW_SIZE = 3
     FALLBACK_INTEREST_RATE = 0.05
 
@@ -35,9 +35,12 @@ def get_prediction(file_path):
     model_payload = joblib.load(MODEL_FILE)
     model = model_payload['model']
     feature_columns = model_payload['feature_columns']
-    # Asegurarse de que la columna TIR esté presente
-    if 'TIR' not in feature_columns:
-        feature_columns.append('TIR')
+    # El modelo entrenado puede esperar una columna 'TIR', la reemplazaremos por 'i'
+    # si está presente. Esto puede requerir re-entrenar el modelo.
+    if 'TIR' in feature_columns:
+        feature_columns = [col if col != 'TIR' else 'i' for col in feature_columns]
+    elif 'i' not in feature_columns:
+        feature_columns.append('i')
 
     # Lectura del CSV con manejo de codificaciones y delimitadores
     try:
@@ -82,12 +85,18 @@ def get_prediction(file_path):
             continue
         # Tomar los últimos WINDOW_SIZE años
         last_window = group.iloc[-WINDOW_SIZE:]
+        # Tasa de Interés de Oportunidad (TIO) estándar
+        i_estandar = 0.12 # 12%
+
         flujo_neto_operativo = (last_window['X16'] - last_window['X18']).tolist()
-        i_deduced = calculate_irr_from_series(flujo_neto_operativo)
-        if i_deduced is None:
-            i_deduced = FALLBACK_INTEREST_RATE
-        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
-        va = calculate_aw_from_pv(vp_neto, i_deduced, WINDOW_SIZE)
+        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_estandar)
+        va = calculate_aw_from_pv(vp_neto, i_estandar, WINDOW_SIZE)
+        
+        # Payback Period (Discounted)
+        # Usamos X10 (Activos Totales) del primer año como inversión inicial aproximada
+        initial_investment = last_window['X10'].iloc[0]
+        payback = calculate_discounted_payback_period(initial_investment, flujo_neto_operativo, i_estandar)
+        
         # Evitar división por cero
         last_X10 = last_window['X10'].iloc[-1]
         if last_X10 == 0:
@@ -100,21 +109,25 @@ def get_prediction(file_path):
             'ROA': roa,
             'Debt_Ratio': debt_ratio,
             'VA': va,
-            'TIR': i_deduced,
+            'Payback_Period': payback,
+            'i': i_estandar,
             'X1': last_window['X1'].iloc[-1],
             'X2': last_window['X2'].iloc[-1],
             'X3': last_window['X3'].iloc[-1],
             'X4': last_window['X4'].iloc[-1],
             'X5': last_window['X5'].iloc[-1],
+            'X6': last_window['X6'].iloc[-1], # Added X6
             'X7': last_window['X7'].iloc[-1],
             'X8': last_window['X8'].iloc[-1],
             'X9': last_window['X9'].iloc[-1],
+            'X10': last_window['X10'].iloc[-1], # Added X10
             'X11': last_window['X11'].iloc[-1],
             'X12': last_window['X12'].iloc[-1],
             'X13': last_window['X13'].iloc[-1],
             'X14': last_window['X14'].iloc[-1],
             'X15': last_window['X15'].iloc[-1],
             'X16': last_window['X16'].iloc[-1],
+            'X17': last_window['X17'].iloc[-1], # Added X17
             'X18': last_window['X18'].iloc[-1]
         })
 
@@ -122,6 +135,11 @@ def get_prediction(file_path):
         return None
 
     predict_df = pd.DataFrame(prediction_features)
+    
+    # Handle infinite Payback Period (replace with a large number for visualization logic)
+    if 'Payback_Period' in predict_df.columns:
+        predict_df['Payback_Period'].replace([np.inf, -np.inf], 1000, inplace=True)
+
     predict_df.replace([np.inf, -np.inf], np.nan, inplace=True)
     predict_df.dropna(inplace=True)
     if predict_df.empty:
@@ -154,7 +172,12 @@ def get_prediction(file_path):
             )
         # Formatear características para la plantilla
         processed_features = {}
-        for col in feature_columns:
+        
+        # Define display order: X1-X18 first, then metrics
+        display_order = [f'X{j}' for j in range(1, 19)] + ['ROA', 'Debt_Ratio', 'VA', 'Payback_Period', 'i']
+        
+        for col in display_order:
+            if col not in row: continue
             value = row[col]
             desc_info = feature_descriptions.get(col, {})
             color = desc_info.get('impact_color', lambda v: 'text-muted')(value)
@@ -165,6 +188,11 @@ def get_prediction(file_path):
                 formatted = f"{value:,.2f}"
             elif unit == 'percent':
                 formatted = f"{value * 100:.2f}%"
+            elif unit == 'years':
+                if value >= 1000: # Check for the placeholder value
+                    formatted = "> 50 años"
+                else:
+                    formatted = f"{value:.1f} años"
             else:
                 formatted = f"{value:.4f}"
             processed_features[col] = {
@@ -205,10 +233,15 @@ feature_descriptions = {
         'unit': 'currency',
         'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
     },
-    'TIR': {
-        'desc': 'Tasa Interna de Retorno (TIR). Calculada a partir de los flujos de caja operativos usando `calculate_irr_from_series`. Indica la tasa de descuento que hace que el VPN sea cero. Un valor positivo sugiere que los flujos generan valor.',
+    'Payback_Period': {
+        'desc': 'Periodo de Recuperación Descontado. Tiempo estimado para recuperar la inversión inicial (Activos Totales) mediante flujos descontados. Un valor bajo indica menor riesgo y mayor liquidez.',
+        'unit': 'years',
+        'impact_color': lambda val: 'text-success' if val < 5 else ('text-warning' if val < 10 else 'text-danger')
+    },
+    'i': {
+        'desc': "Tasa de Interés de Oportunidad (TIO). Tasa de descuento estándar utilizada para los cálculos de Valor Anual. Representa el rendimiento mínimo aceptable de una inversión. En este caso, se usa un valor por defecto del 12%.",
         'unit': 'percent',
-        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+        'impact_color': lambda val: 'text-muted'
     },
     'X2': {
         'desc': 'Costo de Bienes Vendidos. Costos directos de producción. Es una cifra monetaria. Su interpretación depende de la relación con los ingresos y la industria.',
@@ -230,6 +263,11 @@ feature_descriptions = {
         'unit': 'currency',
         'impact_color': lambda val: 'text-muted'
     },
+    'X6': {
+        'desc': 'Ganancia Neta (Net Income). Beneficio total después de todos los gastos e impuestos. Es una cifra monetaria. Es fundamental para calcular el ROA.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
     'X7': {
         'desc': 'Cuentas por Cobrar Totales. Dinero que los clientes deben. Es una cifra monetaria. Un aumento drástico puede ser una señal de alerta.',
         'unit': 'currency',
@@ -244,6 +282,11 @@ feature_descriptions = {
         'desc': 'Ventas Netas. Ingresos totales por ventas. Es una cifra monetaria. Un valor alto y creciente es favorable.',
         'unit': 'currency',
         'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X10': {
+        'desc': 'Activos Totales. Suma de todos los recursos de la empresa. Es el denominador para calcular ROA y Debt Ratio.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
     },
     'X11': {
         'desc': 'Deuda Total a Largo Plazo. Deudas con vencimiento mayor a un año. Es una cifra monetaria. Debe evaluarse en relación con los activos y ganancias.',
@@ -274,6 +317,11 @@ feature_descriptions = {
         'desc': 'Ingresos Totales. Dinero total generado por ventas. Es una cifra monetaria. El crecimiento constante es una señal de salud.',
         'unit': 'currency',
         'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'X17': {
+        'desc': 'Pasivos Totales. Deuda total de la empresa. Es una cifra monetaria. Se usa para calcular el Debt Ratio.',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-muted'
     },
     'X18': {
         'desc': 'Gastos Operativos Totales. Costos del funcionamiento del negocio. Es una cifra monetaria. Deben ser sostenibles en relación con los ingresos.',
@@ -310,7 +358,7 @@ def predict():
             if predictions is None:
                 flash('No se pudieron generar predicciones. Verifica que el CSV tenga suficientes datos (al menos 3 años por empresa) y que los datos sean válidos.')
                 return redirect(url_for('index'))
-            return render_template('results.html', predictions=predictions, feature_descriptions=feature_descriptions)
+            return render_template('results.html', predictions=predictions, feature_descriptions=feature_descriptions, uploaded_filename=filename)
         except Exception as e:
             import traceback
             app.logger.error(f"Error al procesar el archivo: {e}\n{traceback.format_exc()}")
@@ -319,6 +367,42 @@ def predict():
     else:
         flash('Formato de archivo no permitido. Por favor, sube un archivo .csv')
         return redirect(url_for('index'))
+
+@app.route('/visualize/<filename>/<company_name>')
+def visualize(filename, company_name):
+    """Crea una visualización del diagrama de flujo de caja para una empresa."""
+    # Sanitize filename to prevent directory traversal
+    safe_filename = secure_filename(filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], safe_filename)
+
+    if not os.path.exists(filepath):
+        flash(f'No se encontró el archivo de datos: {safe_filename}')
+        return redirect(url_for('index'))
+
+    df = pd.read_csv(filepath)
+    company_df = df[df['company_name'] == company_name].copy()
+
+    if company_df.empty:
+        flash(f'No se encontraron datos para la empresa: {company_name} en el archivo {safe_filename}')
+        return redirect(url_for('index'))
+		
+		# Asegurarse que los datos son numéricos y ordenar
+    company_df['fyear'] = pd.to_numeric(company_df['fyear'], errors='coerce')
+    company_df['X16'] = pd.to_numeric(company_df['X16'], errors='coerce')
+    company_df['X18'] = pd.to_numeric(company_df['X18'], errors='coerce')
+    company_df.dropna(subset=['fyear', 'X16', 'X18'], inplace=True)
+    company_df.sort_values('fyear', inplace=True)
+
+    # Calcular Flujo de Caja Neto
+    company_df['net_cash_flow'] = company_df['X16'] - company_df['X18']
+    
+    chart_data = {
+        'labels': [int(y) for y in company_df['fyear']],
+        'values': list(company_df['net_cash_flow']),
+        'company_name': company_name
+    }
+
+    return render_template('visualize.html', chart_data=chart_data)
 
 if __name__ == '__main__':
     if not os.path.exists(UPLOAD_FOLDER):

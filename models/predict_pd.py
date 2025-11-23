@@ -1,18 +1,22 @@
+import sys
+import os
+
+# Add parent directory to path to import utils
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pandas as pd
 import numpy as np
 import joblib
-import os
-import sys
 import warnings
 import json # Import the json module
-from economic_formulas import *
+from utils.economic_formulas import *
 
 # Ignorar advertencias
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', category=pd.errors.SettingWithCopyWarning)
 
 # --- 1. Carga del Modelo y Datos de Entrada ---
-MODEL_FILE = 'bankruptcy_model.joblib'
+MODEL_FILE = os.path.join(os.path.dirname(__file__), 'bankruptcy_model_v2.joblib')
 
 # Aceptar un nombre de archivo desde la línea de comandos, con un valor por defecto
 if len(sys.argv) > 1:
@@ -65,12 +69,7 @@ for name, group in grouped:
         if len(window) < WINDOW_SIZE:
             continue
 
-        flujo_neto_operativo = (window['X16'] - window['X18']).tolist()
-        i_deduced = calculate_irr_from_series(flujo_neto_operativo)
-        if i_deduced is None:
-            i_deduced = FALLBACK_INTEREST_RATE
 
-        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
         roa = window['X6'].iloc[-1] / window['X10'].iloc[-1]
         debt_ratio = window['X17'].iloc[-1] / window['X10'].iloc[-1]
 
