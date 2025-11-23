@@ -12,7 +12,23 @@
 
   <h3>UNIVERSIDAD NACIONAL DE COLOMBIA</h3>
   <p><strong>Ingeniería Económica - 2015703</strong></p>
+  <p><strong>2025-2</strong></p>
 </div>
+
+---
+
+### Autores: 
+
+- Fabián David Mora Martínez (fmoram@unal.edu.co)
+- Ever Nicolás Muñoz Cortés (evmunoz@unal.edu.co)
+- Isaias David Gallardo Felizzola (igallardo@unal.edu.co)
+- Ángel Manuel Cortavarria Salas (acortavarria@unal.edu.co)
+- Nicolás Alejandro Diosa Benavides (ndiosab@unal.edu.co)
+- Juan Esteban Ocampo Vidal (jocampov@unal.edu.co)
+- Paula Alejandra Murcia Ramírez (pmurciar@unal.edu.co)
+
+### Docente: 
+Diego Alejandro Hernández Castañeda 
 
 ---
 
@@ -116,22 +132,6 @@ La forma más fácil de ejecutar la aplicación sin preocuparse por dependencias
  ┣ 📜 requirements.txt          # Dependencias del proyecto
  ┗ 📜 README.md                 # Documentación del proyecto
 ```
-
----
-
-## 👥 Autores
-
-**Ingeniería Económica - Grupo 2**
-
-*   **Fabián David Mora Martínez**
-*   **Ever Nicolás Muñoz Cortés**
-*   **Isaias David Gallardo Felizzola**
-*   **Ángel Manuel Cortavarria Salas**
-*   **Nicolás Alejandro Diosa Benavides**
-*   **Juan Esteban Ocampo Vidal**
-*   **Paula Alejandra Murcia Ramírez**
-
-**Docente:** Diego Alejandro Hernández Castañeda
 
 ---
 
