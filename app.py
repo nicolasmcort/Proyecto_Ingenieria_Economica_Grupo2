@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 from flask import Flask, request, render_template, redirect, url_for, flash
 from werkzeug.utils import secure_filename
-from economic_formulas import calculate_irr_from_series, calculate_npv_from_series
+from economic_formulas import calculate_irr_from_series, calculate_npv_from_series, calculate_aw_from_pv
 
 # --- Configuración de la Aplicación Flask ---
 UPLOAD_FOLDER = 'uploads'
@@ -12,32 +12,34 @@ ALLOWED_EXTENSIONS = {'csv'}
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.secret_key = 'supersecretkey' # Necesario para los mensajes flash
+app.secret_key = 'supersecretkey'  # Necesario para los mensajes flash
 
-# --- Lógica de Predicción (Corregida para incluir X1) ---
+# --- Funciones auxiliares ---
 
 def allowed_file(filename):
     """Verifica si la extensión del archivo es válida."""
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+
 def get_prediction(file_path):
-    """
-    Procesa un archivo CSV y devuelve las predicciones de quiebra.
-    """
-    # 🚨 CAMBIO CLAVE: Usar el modelo que incluye X1
-    MODEL_FILE = 'bankruptcy_model_v2.joblib' 
+    """Procesa un archivo CSV y devuelve las predicciones de quiebra."""
+    MODEL_FILE = 'bankruptcy_model_v2.joblib'
     WINDOW_SIZE = 3
     FALLBACK_INTEREST_RATE = 0.05
 
     if not os.path.exists(MODEL_FILE):
-        raise FileNotFoundError(f"Archivo del modelo no encontrado: '{MODEL_FILE}'. Asegúrate de haber entrenado y guardado 'bankruptcy_model_v2.joblib'.")
+        raise FileNotFoundError(
+            f"Archivo del modelo no encontrado: '{MODEL_FILE}'. Asegúrate de haber entrenado y guardado 'bankruptcy_model_v2.joblib'."
+        )
 
     model_payload = joblib.load(MODEL_FILE)
     model = model_payload['model']
-    
-    # 🚨 CAMBIO CLAVE: feature_columns ahora debe coincidir con las 17 del nuevo modelo
     feature_columns = model_payload['feature_columns']
+    # Asegurarse de que la columna TIR esté presente
+    if 'TIR' not in feature_columns:
+        feature_columns.append('TIR')
 
+    # Lectura del CSV con manejo de codificaciones y delimitadores
     try:
         df = pd.read_csv(file_path, encoding='utf-8')
     except UnicodeDecodeError:
@@ -52,66 +54,69 @@ def get_prediction(file_path):
             try:
                 df = pd.read_csv(file_path, delimiter=';', encoding='latin1')
             except Exception:
-                raise ValueError("Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto.")
+                raise ValueError(
+                    "Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto."
+                )
         except Exception:
-            raise ValueError("Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto.")
+            raise ValueError(
+                "Error de formato: El archivo CSV no parece estar delimitado por comas ni por punto y coma, o tiene un formato incorrecto."
+            )
     except Exception as e:
         raise ValueError(f"Error al leer el archivo CSV: {e}")
 
-    # --- Ingeniería de Características (Idéntica al entrenamiento) ---
-    cols_to_process = ['X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X8', 'X9', 'X10', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17', 'X18', 'fyear']
+    # Ingeniería de características (idéntica al entrenamiento)
+    cols_to_process = [
+        'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X8', 'X9', 'X10',
+        'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17', 'X18', 'fyear'
+    ]
     for col in cols_to_process:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     df.sort_values(['company_name', 'fyear'], inplace=True)
-    
+
     prediction_features = []
     grouped = df.groupby('company_name')
 
     for name, group in grouped:
         if len(group) < WINDOW_SIZE:
             continue
-
-        if len(group) >= WINDOW_SIZE:
-            last_window = group.iloc[-WINDOW_SIZE:]
-            
-            flujo_neto_operativo = (last_window['X16'] - last_window['X18']).tolist()
-            
-            i_deduced = calculate_irr_from_series(flujo_neto_operativo)
-            if i_deduced is None:
-                i_deduced = FALLBACK_INTEREST_RATE
-
-            vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
-            
-            # Asegurarse de que los denominadores no sean cero
-            last_X10 = last_window['X10'].iloc[-1]
-            if last_X10 == 0:
-                continue # O manejar de otra forma
-
-            roa = last_window['X6'].iloc[-1] / last_X10
-            debt_ratio = last_window['X17'].iloc[-1] / last_X10
-
-            prediction_features.append({
-                'company_name': name,
-                'fyear': last_window['fyear'].iloc[-1],
-                'ROA': roa,
-                'Debt_Ratio': debt_ratio,
-                'X1': last_window['X1'].iloc[-1], # <<< AÑADIDA X1 A LAS CARACTERÍSTICAS
-                'X2': last_window['X2'].iloc[-1],
-                'X3': last_window['X3'].iloc[-1],
-                'X4': last_window['X4'].iloc[-1],
-                'X5': last_window['X5'].iloc[-1],
-                'X7': last_window['X7'].iloc[-1],
-                'X8': last_window['X8'].iloc[-1],
-                'X9': last_window['X9'].iloc[-1],
-                'X11': last_window['X11'].iloc[-1],
-                'X12': last_window['X12'].iloc[-1],
-                'X13': last_window['X13'].iloc[-1],
-                'X14': last_window['X14'].iloc[-1],
-                'X15': last_window['X15'].iloc[-1],
-                'X16': last_window['X16'].iloc[-1],
-                'X18': last_window['X18'].iloc[-1]
-            })
+        # Tomar los últimos WINDOW_SIZE años
+        last_window = group.iloc[-WINDOW_SIZE:]
+        flujo_neto_operativo = (last_window['X16'] - last_window['X18']).tolist()
+        i_deduced = calculate_irr_from_series(flujo_neto_operativo)
+        if i_deduced is None:
+            i_deduced = FALLBACK_INTEREST_RATE
+        vp_neto = calculate_npv_from_series(flujo_neto_operativo, i_deduced)
+        va = calculate_aw_from_pv(vp_neto, i_deduced, WINDOW_SIZE)
+        # Evitar división por cero
+        last_X10 = last_window['X10'].iloc[-1]
+        if last_X10 == 0:
+            continue
+        roa = last_window['X6'].iloc[-1] / last_X10
+        debt_ratio = last_window['X17'].iloc[-1] / last_X10
+        prediction_features.append({
+            'company_name': name,
+            'fyear': last_window['fyear'].iloc[-1],
+            'ROA': roa,
+            'Debt_Ratio': debt_ratio,
+            'VA': va,
+            'TIR': i_deduced,
+            'X1': last_window['X1'].iloc[-1],
+            'X2': last_window['X2'].iloc[-1],
+            'X3': last_window['X3'].iloc[-1],
+            'X4': last_window['X4'].iloc[-1],
+            'X5': last_window['X5'].iloc[-1],
+            'X7': last_window['X7'].iloc[-1],
+            'X8': last_window['X8'].iloc[-1],
+            'X9': last_window['X9'].iloc[-1],
+            'X11': last_window['X11'].iloc[-1],
+            'X12': last_window['X12'].iloc[-1],
+            'X13': last_window['X13'].iloc[-1],
+            'X14': last_window['X14'].iloc[-1],
+            'X15': last_window['X15'].iloc[-1],
+            'X16': last_window['X16'].iloc[-1],
+            'X18': last_window['X18'].iloc[-1]
+        })
 
     if not prediction_features:
         return None
@@ -119,23 +124,16 @@ def get_prediction(file_path):
     predict_df = pd.DataFrame(prediction_features)
     predict_df.replace([np.inf, -np.inf], np.nan, inplace=True)
     predict_df.dropna(inplace=True)
-
     if predict_df.empty:
         return None
 
-    # El orden de las columnas DEBE coincidir con feature_columns del modelo cargado
-    X_pred = predict_df[feature_columns] 
-    
-    # El modelo de scikit-learn predice la probabilidad con predict_proba
-    probabilities = model.predict_proba(X_pred)[:, 1] # Probabilidad de la clase '1' (failed)
+    X_pred = predict_df[feature_columns]
+    probabilities = model.predict_proba(X_pred)[:, 1]
     predict_df['prediction_probability'] = probabilities
-    
-    # --- Asignar Diagnóstico y Color ---
+
     results = []
-    for index, row in predict_df.iterrows():
+    for _, row in predict_df.iterrows():
         prob = row['prediction_probability']
-        diagnosis = ''
-        color_class = ''
         if prob > 0.5:
             diagnosis = 'ALTO RIESGO'
             color_class = 'danger'
@@ -145,39 +143,39 @@ def get_prediction(file_path):
         else:
             diagnosis = 'BAJO RIESGO'
             color_class = 'success'
-
         warnings = []
-        # Sanity check de los ratios calculados
         if not (-10 < row['ROA'] < 10):
-            warnings.append("Advertencia: El ratio ROA (Rentabilidad sobre Activos) tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable.")
+            warnings.append(
+                "Advertencia: El ratio ROA (Rentabilidad sobre Activos) tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable."
+            )
         if not (0 <= row['Debt_Ratio'] < 10):
-            warnings.append("Advertencia: El ratio de Endeudamiento tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable.")
-
-        # Pre-procesar las características para la plantilla
+            warnings.append(
+                "Advertencia: El ratio de Endeudamiento tiene un valor extremo, lo que sugiere un posible error en los datos de entrada. La predicción puede no ser fiable."
+            )
+        # Formatear características para la plantilla
         processed_features = {}
         for col in feature_columns:
             value = row[col]
-            description_info = feature_descriptions.get(col, {})
-            color = description_info.get('impact_color', lambda v: 'text-muted')(value)
-            unit = description_info.get('unit', '')
-
+            desc_info = feature_descriptions.get(col, {})
+            color = desc_info.get('impact_color', lambda v: 'text-muted')(value)
+            unit = desc_info.get('unit', '')
             if unit == 'ratio':
-                formatted_value = f"{value:.4f}" # Formato de ratio como número decimal
+                formatted = f"{value:.4f}"
             elif unit == 'currency':
-                formatted_value = f"{value:,.2f}" # Formato de moneda con comas
+                formatted = f"{value:,.2f}"
+            elif unit == 'percent':
+                formatted = f"{value * 100:.2f}%"
             else:
-                formatted_value = f"{value:.4f}"
-
+                formatted = f"{value:.4f}"
             processed_features[col] = {
-                'value': formatted_value,
-                'desc': description_info.get('desc', 'Descripción no disponible.'),
+                'value': formatted,
+                'desc': desc_info.get('desc', 'Descripción no disponible.'),
                 'impact_color': color
             }
-
         results.append({
             'company': row['company_name'],
             'year': int(row['fyear']),
-            'probability': f"{prob*100:.2f}%",
+            'probability': f"{prob * 100:.2f}%",
             'diagnosis': diagnosis,
             'color_class': color_class,
             'features': processed_features,
@@ -185,7 +183,7 @@ def get_prediction(file_path):
         })
     return results
 
-# 🚨 CAMBIO CLAVE: AÑADIR DESCRIPCIÓN Y LÓGICA DE COLOR PARA X1
+# --- Descripciones de características (incluye TIR) ---
 feature_descriptions = {
     'X1': {
         'desc': 'Activos Corrientes Totales. Recursos que se espera convertir en efectivo o consumir en un año. Es una cifra monetaria. Un valor alto en relación con los Pasivos Corrientes (X14) es favorable.',
@@ -201,6 +199,16 @@ feature_descriptions = {
         'desc': 'Debt Ratio (Ratio de Endeudamiento). Proporción de activos financiados por deuda. Se expresa como un ratio, donde un valor de 0.6 equivale a un 60%. Un ratio inferior a 0.6 es saludable. Superior a 1.0 indica que la deuda supera los activos.',
         'unit': 'ratio',
         'impact_color': lambda val: 'text-success' if val < 0.4 else ('text-warning' if val < 0.6 else 'text-danger')
+    },
+    'VA': {
+        'desc': 'Valor Anual (VA). Valor anual equivalente de los flujos de caja operativos. Normaliza el VPN por período, permitiendo comparar empresas de diferentes tamaños. Un VA positivo indica que las operaciones generan valor sostenible por año. Fórmula del Capítulo 6: VA = VPN × (A/P, i, n).',
+        'unit': 'currency',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
+    },
+    'TIR': {
+        'desc': 'Tasa Interna de Retorno (TIR). Calculada a partir de los flujos de caja operativos usando `calculate_irr_from_series`. Indica la tasa de descuento que hace que el VPN sea cero. Un valor positivo sugiere que los flujos generan valor.',
+        'unit': 'percent',
+        'impact_color': lambda val: 'text-success' if val > 0 else 'text-danger'
     },
     'X2': {
         'desc': 'Costo de Bienes Vendidos. Costos directos de producción. Es una cifra monetaria. Su interpretación depende de la relación con los ingresos y la industria.',
@@ -274,7 +282,7 @@ feature_descriptions = {
     }
 }
 
-GITHUB_REPO_URL = "https://github.com/nicolasmcort/Proyecto_Ingenieria_Economica_Grupo2.git" # Placeholder URL
+GITHUB_REPO_URL = "https://github.com/nicolasmcort/Proyecto_Ingenieria_Economica_Grupo2.git"
 
 # --- Rutas de la Aplicación Web ---
 
@@ -286,41 +294,33 @@ def index():
 def predict():
     if 'file' not in request.files:
         flash('No se encontró el campo del archivo.')
-        return redirect(url_for('index')) # Redirect to index if no file
-    
+        return redirect(url_for('index'))
     file = request.files['file']
-
     if file.filename == '':
         flash('Ningún archivo seleccionado.')
-        return redirect(url_for('index')) # Redirect to index if no file selected
-
+        return redirect(url_for('index'))
     if file and allowed_file(file.filename):
-        # Crear el directorio de subidas si no existe
         if not os.path.exists(app.config['UPLOAD_FOLDER']):
             os.makedirs(app.config['UPLOAD_FOLDER'])
-            
         filename = secure_filename(file.filename)
         filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
         file.save(filepath)
-        
         try:
             predictions = get_prediction(filepath)
             if predictions is None:
-                flash('No se pudieron generar predicciones. Asegúrate de que el CSV tenga suficientes datos (al menos 3 años por empresa) y que los datos sean válidos.')
-                return redirect(url_for('index')) # Redirect to index if no predictions
-            # Pasa los resultados a la plantilla de resultados
+                flash('No se pudieron generar predicciones. Verifica que el CSV tenga suficientes datos (al menos 3 años por empresa) y que los datos sean válidos.')
+                return redirect(url_for('index'))
             return render_template('results.html', predictions=predictions, feature_descriptions=feature_descriptions)
         except Exception as e:
             import traceback
             app.logger.error(f"Error al procesar el archivo: {e}\n{traceback.format_exc()}")
             flash(f'Ocurrió un error al procesar el archivo: {e}. Por favor, revisa el formato de tu CSV.')
-            return redirect(url_for('index')) # Redirect to index on error
+            return redirect(url_for('index'))
     else:
         flash('Formato de archivo no permitido. Por favor, sube un archivo .csv')
-        return redirect(url_for('index')) # Redirect to index on invalid file type
+        return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    # Crear la carpeta de subidas si no existe
     if not os.path.exists(UPLOAD_FOLDER):
         os.makedirs(UPLOAD_FOLDER)
     app.run(debug=True)
