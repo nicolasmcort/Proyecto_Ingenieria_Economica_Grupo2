@@ -1,220 +1,140 @@
-# Análisis de Riesgo de Quiebra Corporativa
-<br>
+# 📉 Análisis de Riesgo de Quiebra Corporativa
+
 <div align="center">
-  <img src="https://www.pngkey.com/png/detail/268-2688228_universidad-nacional-colombia-logo.png" width="230" alt="Logo Universidad Nacional de Colombia">
-</div>
-<h2 align="center">UNIVERSIDAD NACIONAL DE COLOMBIA</h2> 
-<p align="center">
-  <strong>Ingeniería Económica - 2015703</strong>
-</p>
-<br><br>
+  <img src="https://www.pngkey.com/png/detail/268-2688228_universidad-nacional-colombia-logo.png" width="200" alt="Logo Universidad Nacional de Colombia">
+  <br><br>
+  
+  ![Python](https://img.shields.io/badge/Python-3.9+-blue?style=for-the-badge&logo=python&logoColor=white)
+  ![Flask](https://img.shields.io/badge/Flask-2.0+-green?style=for-the-badge&logo=flask&logoColor=white)
+  ![Docker](https://img.shields.io/badge/Docker-Enabled-blue?style=for-the-badge&logo=docker&logoColor=white)
+  ![Scikit-Learn](https://img.shields.io/badge/scikit--learn-F7931E?style=for-the-badge&logo=scikit-learn&logoColor=white)
+  ![Bootstrap](https://img.shields.io/badge/Bootstrap-5-purple?style=for-the-badge&logo=bootstrap&logoColor=white)
 
-### Autores: 
-
-- Fabián David Mora Martínez (fmoram@unal.edu.co)
-- Ever Nicolás Muñoz Cortés (evmunoz@unal.edu.co)
-- Isaias David Gallardo Felizzola (igallardo@unal.edu.co)
-- Ángel Manuel Cortavarria Salas (acortavarria@unal.edu.co)
-- Nicolás Alejandro Diosa Benavides (ndiosab@unal.edu.co)
-- Juan Esteban Ocampo Vidal (jocampov@unal.edu.co)
-- Paula Alejandra Murcia Ramírez (pmurciar@unal.edu.co)
-
-### Docente: 
-Diego Alejandro Hernández Castañeda 
-<br><br>
-
----
-
-## Contenido
-
-- [1. Objetivos](#1-objetivos)
-- [2. Principios de Ingeniería Económica Aplicados](#2-principios-de-ingeniería-económica-aplicados)
-- [3. Guía de Usuario](#3-guía-de-usuario)
-- [4. Guía para Desarrolladores](#4-guía-para-desarrolladores)
-- [5. Estructura del Proyecto](#5-estructura-del-proyecto)
-- [6. Modelo de Machine Learning](#6-modelo-de-machine-learning)
-- [7. Tecnologías Utilizadas](#7-tecnologías-utilizadas)
-- [8. Conclusiones](#8-conclusiones)
-- [9. Referencias](#9-referencias)
-
-<br><br>
-
----
-
-## 1. Objetivos
-
-- **Objetivo General**: Desarrollar una aplicación web interactiva que, aplicando conceptos de ingeniería económica y un modelo de Machine Learning, permita predecir la probabilidad de quiebra de una empresa a partir de sus datos financieros históricos.
-- **Objetivos Específicos**:
-  - Implementar un modelo de Machine Learning en Python para clasificar a las empresas en categorías de riesgo.
-  - Realizar una ingeniería de características para transformar datos crudos en ratios financieros significativos.
-  - Diseñar una interfaz de usuario web intuitiva utilizando Flask y Bootstrap para facilitar la carga de datos y la visualización clara de los resultados.
-  - Empaquetar la aplicación en contenedores Docker para garantizar un despliegue y ejecución sencillos.
-<br><br>
-
----
-
-## 2. Principios de Ingeniería Económica Aplicados
-
-Para construir el modelo predictivo, se aplicaron ratios y métricas fundamentales del análisis financiero, que son pilares de la ingeniería económica para evaluar la salud y viabilidad de una empresa.
-
-- **Ratios de Rentabilidad**:
-  - **ROA (Return on Assets)**: Mide la rentabilidad de la empresa en relación con sus activos totales. Un ROA bajo o negativo indica un uso ineficiente de los activos para generar ganancias.
-  - **EBIT y EBITDA**: Miden la ganancia operativa de la empresa antes de deducir intereses e impuestos (EBIT) y, adicionalmente, depreciación y amortización (EBITDA). Son indicadores clave de la capacidad de una empresa para generar beneficios a partir de sus operaciones principales.
-
-- **Ratios de Endeudamiento**:
-  - **Debt Ratio (Ratio de Endeudamiento)**: Compara la deuda total con los activos totales. Un ratio elevado puede indicar un apalancamiento excesivo y un mayor riesgo de insolvencia si la empresa no puede cumplir con sus obligaciones.
-
-- **Análisis de Estados Financieros**: El modelo utiliza directamente variables extraídas de los estados financieros, como:
-  - **Ingresos Totales (X16)** y **Ventas Netas (X9)**: Indican la capacidad de la empresa para generar ventas.
-  - **Costos y Gastos (X2, X18)**: Reflejan la estructura de costos de la empresa.
-  - **Activos y Pasivos (X1, X10, X14, X17)**: Permiten evaluar la estructura de capital y la liquidez.
-  - **Ganancias Retenidas (X15)**: Muestran la porción de las ganancias que se reinvierte en el negocio, un indicador de crecimiento y solidez a largo plazo.
-
-La combinación de estos indicadores permite al modelo de Regresión Logística aprender los patrones que distinguen a las empresas saludables de aquellas en riesgo de quiebra.
-<br><br>
-
----
-
-## 3. Guía de Usuario
-
-Esta guía explica cómo utilizar la aplicación para obtener y entender el diagnóstico de riesgo financiero de una empresa.
-
-### Paso 1: Preparar el Archivo CSV
-
-- **Formato**: El archivo debe ser de tipo `.csv`.
-- **Columnas Requeridas**: Debe contener `company_name`, `fyear` (año fiscal), y las variables financieras (`X1`, `X2`, etc.). Puedes usar los archivos de ejemplo (`C_low_risk.csv`, `C_high_risk.csv`, etc.) como plantilla.
-- **Datos Históricos**: Para que una empresa sea analizada, debe tener registros de **al menos 3 años consecutivos**.
-
-### Paso 2: Subir y Analizar
-
-1.  En la página de inicio, haz clic en **"Seleccionar archivo"** y elige tu archivo `.csv`.
-2.  Presiona el botón **"Analizar y Predecir"**.
-3.  La aplicación te redirigirá a la página de resultados.
-
-### Paso 3: Interpretar los Resultados
-
-Para cada empresa analizada, verás una tarjeta de resultados como la siguiente:
-
-#### a) Diagnóstico General
-En la parte superior, encontrarás el resumen del análisis:
-- **Diagnóstico**: `BAJO RIESGO`, `RIESGO MODERADO` o `ALTO RIESGO`, con un color distintivo (verde, amarillo o rojo).
-- **Nombre de la Empresa y Año**: Identifica la empresa y el último año de datos utilizado.
-- **Probabilidad de Quiebra**: El porcentaje de riesgo que el modelo ha calculado.
-
-#### b) Advertencias sobre Datos (Si Aplica)
-Si los datos de entrada para una empresa parecen anómalos (por ejemplo, ratios financieros con valores extremos), aparecerá una alerta como esta. Estas advertencias indican que la predicción para esa empresa puede no ser fiable.
-
-<div class="alert alert-warning small p-2" role="alert">
-    <i class="bi bi-exclamation-triangle-fill me-2"></i>Advertencia: El ratio ROA tiene un valor extremo, lo que sugiere un posible error en los datos de entrada.
+  <h3>UNIVERSIDAD NACIONAL DE COLOMBIA</h3>
+  <p><strong>Ingeniería Económica - 2015703</strong></p>
 </div>
 
-#### c) Detalles del Análisis
-Al hacer clic en el desplegable **"Detalles del Análisis"**, encontrarás una tabla con las métricas clave utilizadas por el modelo:
+---
 
-- **Métrica**: El nombre del indicador financiero (ej. `ROA`, `Debt_Ratio`).
-- **Valor**: El valor calculado para esa métrica.
-  - **Ratios (ej. ROA, Debt_Ratio)**: Se muestran como un número decimal (ej., `0.08`). La descripción te ayudará a interpretarlo como un porcentaje (ej., `un valor de 0.08 equivale a un 8%`).
-  - **Valores Monetarios (ej. EBITDA, Ventas Netas)**: Se muestran como números con separadores de miles para facilitar la lectura.
-- **Descripción**: Explica qué es la métrica, cómo interpretarla y cuál es un rango generalmente saludable. El color del valor (`verde`, `amarillo`, `rojo` o `gris`) te da una pista visual rápida sobre si el valor es favorable, riesgoso o neutro.
+## 📋 Descripción del Proyecto
 
-<br><br>
+Este proyecto es una herramienta avanzada de **predicción de quiebra corporativa** que fusiona el poder del **Machine Learning** con los principios fundamentales de la **Ingeniería Económica**.
+
+El objetivo principal es proporcionar a analistas financieros, inversores y gerentes una plataforma web intuitiva para evaluar la salud financiera de una empresa. A partir de datos históricos (estados financieros), el sistema calcula una probabilidad de quiebra y ofrece un diagnóstico detallado, complementado con métricas de valor y tiempo de recuperación.
+
+### 🌟 Características Clave
+*   **Predicción Inteligente**: Utiliza un modelo de Regresión Logística entrenado con miles de registros históricos.
+*   **Análisis Financiero Profundo**: Calcula y visualiza ratios clave como ROA y Debt Ratio.
+*   **Ingeniería Económica**: Integra cálculos de Valor Presente Neto (VPN), Valor Anual (VA) y Periodo de Recuperación Descontado.
+*   **Interfaz Moderna**: Dashboard web limpio y responsivo para una fácil interpretación de los datos.
+*   **Alertas Automáticas**: Detecta anomalías en los datos de entrada que podrían afectar la fiabilidad del análisis.
 
 ---
 
-## 4. Guía para Desarrolladores
+## 💰 Principios de Ingeniería Económica
 
-### Requisitos Previos
-- **Docker Desktop** (Recomendado) o **Python 3.8+** y **pip**.
+Este proyecto no solo predice riesgos, sino que evalúa la viabilidad económica de la empresa utilizando conceptos del texto guía *Ingeniería Económica* de Blank & Tarquin.
 
-### Instalación y Ejecución con Docker (Recomendado)
-1.  **Construye y levanta el contenedor:**
+### 1. Valor Presente Neto (VPN)
+El **VPN** trae todos los flujos de caja futuros (ingresos menos egresos) al presente, descontados a una tasa de interés de oportunidad (TIO).
+*   **Fórmula**: $VPN = \sum_{t=1}^{n} \frac{F_t}{(1+i)^t}$
+*   **Interpretación**: Un $VPN > 0$ indica que la empresa está generando valor por encima de su costo de oportunidad.
+
+### 2. Valor Anual Equivalente (VA)
+El **VA** convierte el VPN en una serie uniforme anual equivalente. Esto es crucial para comparar empresas de diferentes tamaños o vidas útiles.
+*   **Fórmula**: $VA = VPN(A/P, i, n)$
+*   **Aplicación**: Nos permite decir "esta empresa genera X cantidad de valor *por año*", facilitando la comparación directa.
+
+### 3. Periodo de Recuperación Descontado (Payback Period)
+Calcula cuánto tiempo tarda la empresa en recuperar su inversión inicial (considerada aquí como los Activos Totales) utilizando los flujos de caja descontados.
+*   **Importancia**: Mide la liquidez y el riesgo. Un periodo más corto significa una recuperación más rápida y menor exposición al riesgo.
+*   **Visualización**: Si la inversión no se recupera en el horizonte de tiempo, el sistema proyecta los flujos o indica "> 50 años".
+
+---
+
+## 🚀 Guía de Instalación y Uso
+
+### Opción A: Docker (Recomendada) 🐳
+La forma más fácil de ejecutar la aplicación sin preocuparse por dependencias.
+
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone https://github.com/nicolasmcort/Proyecto_Ingenieria_Economica_Grupo2.git
+    cd Proyecto_Ingenieria_Economica_Grupo2
+    ```
+2.  **Construir y correr:**
     ```bash
     docker-compose up --build
     ```
-2.  **Accede a la aplicación:**
-    Abre tu navegador y ve a: [http://localhost:5000](http://localhost:5000)
+3.  **Abrir en el navegador:**
+    Visita [http://localhost:5000](http://localhost:5000)
 
-### Instalación y Ejecución Manual
-1.  **Crea y activa un entorno virtual:**
+### Opción B: Ejecución Manual 🐍
+
+1.  **Crear entorno virtual:**
     ```bash
-    # Windows
     python -m venv venv
-    venv\Scripts\activate
+    # Windows: venv\Scripts\activate
+    # Mac/Linux: source venv/bin/activate
     ```
-    ```bash
-    # macOS/Linux
-    python3 -m venv venv
-    source venv/bin/activate
-    ```
-2.  **Instala las dependencias:**
+2.  **Instalar dependencias:**
     ```bash
     pip install -r requirements.txt
     ```
-3.  **Ejecuta la aplicación:**
+3.  **Ejecutar la aplicación:**
     ```bash
     python app.py
     ```
-4.  **Accede a la aplicación:**
-    Abre tu navegador y ve a: [http://localhost:5000](http://localhost:5000)
-<br><br>
 
 ---
 
-## 5. Estructura del Proyecto
+## 📖 Cómo Usar la Herramienta
+
+1.  **Prepara tus Datos**: Necesitas un archivo `.csv` con columnas como `company_name`, `fyear`, y las variables financieras `X1` a `X18`. (Ver carpeta `data/` para ejemplos).
+2.  **Carga el Archivo**: En la página de inicio, selecciona tu archivo CSV.
+3.  **Analiza**: Haz clic en "Analizar y Predecir".
+4.  **Interpreta**:
+    *   🟢 **Bajo Riesgo**: La empresa es sólida.
+    *   🟡 **Riesgo Moderado**: Precaución, revisar indicadores.
+    *   🔴 **Alto Riesgo**: Alta probabilidad de insolvencia.
+5.  **Explora**: Despliega los detalles para ver el **ROA**, **Debt Ratio**, **VA** y el **Payback Period**.
+
+---
+
+## 📂 Estructura del Proyecto
+
 ```
-.
-├── Dockerfile                  # Define el entorno de la aplicación para Docker.
-├── app.py                      # Lógica principal de la aplicación web (Flask).
-├── bankruptcy_model.joblib     # Archivo del modelo de Machine Learning entrenado.
-├── *.csv                       # Archivos de datos de ejemplo y el dataset completo.
-├── docker-compose.yml          # Orquesta la construcción y ejecución del contenedor.
-├── logistic_regression_pd_model.py # Script para entrenar y guardar el modelo.
-├── requirements.txt            # Lista de dependencias de Python.
-├── README.md                   # Este archivo.
-├── templates/
-│   ├── index.html              # Página de inicio con el formulario de subida.
-│   └── results.html            # Página que muestra los resultados de la predicción.
-└── uploads/                    # Carpeta para almacenar los CSV subidos (se crea autom.).
+📦 Proyecto_Ingenieria_Economica
+ ┣ 📂 data/                     # Datasets de ejemplo y pruebas
+ ┣ 📂 models/                   # Modelos entrenados (.joblib) y scripts de entrenamiento
+ ┣ 📂 static/                   # Assets (CSS, JS, imágenes)
+ ┣ 📂 templates/                # Plantillas HTML (Flask)
+ ┣ 📂 utils/                    # Módulos de utilidades (fórmulas económicas)
+ ┣ 📜 app.py                    # Aplicación principal Flask
+ ┣ 📜 Dockerfile                # Configuración de Docker
+ ┣ 📜 docker-compose.yml        # Orquestación de servicios
+ ┣ 📜 requirements.txt          # Dependencias del proyecto
+ ┗ 📜 README.md                 # Documentación del proyecto
 ```
-<br><br>
 
 ---
 
-## 6. Modelo de Machine Learning
+## 👥 Autores
 
-El núcleo del proyecto es un modelo de **Regresión Logística** entrenado con el dataset `american_bankruptcy_dataset.csv`. Este modelo fue elegido por su interpretabilidad y eficiencia.
+**Ingeniería Económica - Grupo 2**
 
-- **Características (Features)**: El modelo no utiliza directamente las 18 variables `X`, sino un conjunto de características de ingeniería que incluyen los ratios **ROA** y **Debt Ratio**, junto con las variables financieras más relevantes.
-- **Entrenamiento**: El script `logistic_regression_pd_model.py` contiene el código para pre-procesar los datos, realizar la ingeniería de características y entrenar el modelo, que finalmente se guarda en `bankruptcy_model.joblib` para ser utilizado por la aplicación Flask.
-<br><br>
+*   **Fabián David Mora Martínez**
+*   **Ever Nicolás Muñoz Cortés**
+*   **Isaias David Gallardo Felizzola**
+*   **Ángel Manuel Cortavarria Salas**
+*   **Nicolás Alejandro Diosa Benavides**
+*   **Juan Esteban Ocampo Vidal**
+*   **Paula Alejandra Murcia Ramírez**
 
----
-
-## 7. Tecnologías Utilizadas
-
-- **Backend**: Python, Flask, Pandas, NumPy, Scikit-learn.
-- **Frontend**: HTML5, CSS3, Bootstrap 5, Bootstrap Icons, AOS.
-- **Despliegue**: Docker, Docker Compose.
-<br><br>
+**Docente:** Diego Alejandro Hernández Castañeda
 
 ---
 
-## 8. Conclusiones
-
-- Se desarrolló con éxito un modelo de Machine Learning capaz de predecir la quiebra empresarial, integrando de manera efectiva los principios de ingeniería económica en la selección y creación de variables predictivas.
-- Se construyó una aplicación web funcional y estéticamente agradable que abstrae la complejidad del modelo. La interfaz ahora ofrece una herramienta de diagnóstico financiero accesible, con explicaciones detalladas, formato de valores claro y advertencias automáticas sobre datos de entrada anómalos.
-- Se garantizó la portabilidad y reproducibilidad del proyecto mediante la containerización con Docker, lo que simplifica enormemente su despliegue.
-<br><br>
-
----
-
-## 9. Referencias
-
-- **Texto Guía**: Blank, L., & Tarquin, A. (2012). *Ingeniería Económica* (7.a ed.). McGraw-Hill.
-- **Dataset**: `futureinternet-14-00244-v2.pdf` - Documento que describe las variables del dataset original.
-
----
 <div align="center">
-    <img src="https://media.tenor.com/mG24i4G4qZkAAAAC/thumbs-up-computer.gif" width="300" alt="Todo listo">
+    <p>Hecho con ❤️ y ☕ por estudiantes de la UNAL</p>
 </div>
-<br>
